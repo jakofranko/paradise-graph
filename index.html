@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title>Paradise Visualizer</title>
+		<script src="paradise.js"></script>
+        <script>
+            const data = paradise.map((row) => {
+                console.log(row);
+                const splitRow = row.split(' ');
+
+                let code = splitRow[0]; 
+                let name = splitRow[1];
+                let attr, program, note;
+
+                // If more than one space is found in a row, it starts a new section
+                let sectionIndex = 0;
+                let lastWord = '';
+                for (let i = 2; i < splitRow.length; i++) {
+                    const word = splitRow[i];
+
+                    // We found a vessel with a name at the size limit.
+                    // This word is the attr    
+                    if (i == 2 && word != '') {
+                        attr = word;
+                        lastWord = word;
+                        sectionIndex++;
+                        console.log('Woah! Big name!', word); 
+                        continue;
+                    }
+
+                    // We found an attr at the size limit
+                    if (i == 3 && word != '') {
+                        program = word;
+                        lastWord = word;
+                        sectionIndex++;
+                        console.log('Woah! Big attr!', word); 
+                        continue;
+                    }
+
+                    // Skip consecutive spaces
+                    if (word == '' && lastWord == '') {
+                        continue;
+                    }
+
+                    // Skip spaces and increment sectionIndex
+                    if (word == '') {
+                        sectionIndex++;
+                        lastWord = word;
+                        continue;
+                    }
+
+                    if (sectionIndex == 0) {
+                        attr = word;
+                    }
+
+                    if (sectionIndex == 1) {
+                        if (program == undefined) program = [];
+                        program.push(word);
+                    }
+
+                    if (sectionIndex == 2) {
+                        if (note == undefined) note = [];
+                        note.push(word);
+                    }
+
+                    lastWord = word;
+                }
+
+                // TODO: handle programs at char limit
+                // TODO: handle vessels without attrs, but notes and/or programs
+
+                // If a vessel has a note but no program, the note will have been
+                // put in the program space.
+                if (note == undefined && program && program.length && program.length > 0) {
+                    note = [...program];
+                    program = undefined;
+                }
+                return { code, name, attr, program, note };
+            });
+        </script>
+	</head>
+	<body>
+		<div id="graph"></div>
+		<script type="module">
+			import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+			// Declare the chart dimensions and margins.
+			const container = document.getElementById('graph');
+			const width = 640;
+			const height = 400;
+			const marginTop = 20;
+			const marginRight = 20;
+			const marginBottom = 30;
+			const marginLeft = 40;
+
+			// Declare the x (horizontal position) scale.
+				const x = d3.scaleUtc()
+				.domain([new Date("2023-01-01"), new Date("2024-01-01")])
+				.range([marginLeft, width - marginRight]);
+
+			// Declare the y (vertical position) scale.
+				const y = d3.scaleLinear()
+				.domain([0, 100])
+				.range([height - marginBottom, marginTop]);
+
+			// Create the SVG container.
+				const svg = d3.create("svg")
+				.attr("width", width)
+				.attr("height", height);
+
+			// Add the x-axis.
+				svg.append("g")
+				.attr("transform", `translate(0,${height - marginBottom})`)
+				.call(d3.axisBottom(x));
+
+			// Add the y-axis.
+				svg.append("g")
+				.attr("transform", `translate(${marginLeft},0)`)
+				.call(d3.axisLeft(y));
+
+			// Append the SVG element.
+				container.append(svg.node());
+		</script>
+	</body>
+</html>
