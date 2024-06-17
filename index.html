@@ -4,83 +4,47 @@
 		<meta charset="UTF-8">
 		<title>Paradise Visualizer</title>
 		<script src="paradise.js"></script>
-        <script>
-            const data = paradise.map((row, index) => {
-                const splitRow = row.split(' ');
+        <style>
+            #container {
+                display: flex;
+            }
 
-                let code = splitRow[0]; 
-                let name = splitRow[1];
-                let attr = [], 
-                    program = [], 
-                    note = [];
+            #data {
+                width: 400px;
+            }
 
-                // If more than one space is found in a row, it starts a new section
-                let sectionIndex = 0;
-                let lastWord = '';
-                for (let i = 2; i < splitRow.length; i++) {
-                    const word = splitRow[i];
+            dt, dd {
+                word-wrap: break-word;
+            }
 
-                    // We found a vessel with a name at the size limit.
-                    // This word is the attr    
-                    if (i == 2 && word != '') {
-                        attr.push(word);
-                        lastWord = word;
-                        sectionIndex++;
-                        console.log('Woah! Big name!', word, index); 
-                        continue;
-                    }
-
-                    // We found an attr at the size limit
-                    if (i == 3 && word != '') {
-                        program.push(word);
-                        lastWord = word;
-                        sectionIndex++;
-                        console.log('Woah! Big attr!', word, index); 
-                        continue;
-                    }
-
-                    // Skip consecutive spaces
-                    if (word == '' && lastWord == '') {
-                        continue;
-                    }
-
-                    // Skip spaces and increment sectionIndex
-                    if (word == '') {
-                        sectionIndex++;
-                        lastWord = word;
-                        continue;
-                    }
-
-                    if (sectionIndex == 0) {
-                        attr.push(word);
-                    }
-
-                    if (sectionIndex == 1) {
-                        program.push(word);
-                    }
-
-                    if (sectionIndex == 2) {
-                        note.push(word);
-                    }
-
-                    lastWord = word;
-                }
-
-                // TODO: handle programs at char limit
-                // TODO: handle vessels without attrs, but notes and/or programs
-
-                // If a vessel has a note but no program, the note will have been
-                // put in the program space.
-                if (note.length  == 0 && program.length > 0) {
-                    note = [...program];
-                    program = undefined;
-                }
-                return { code, name, attr, program, note };
-            });
-        </script>
+        </style>
 	</head>
 	<body>
-		<div id="graph"></div>
+        <div id="container">
+            <div id="control-panel">
+                <div id="data">
+                    <dl>
+                        <dt>Name</dt>
+                        <dd id="name"></dd>
+                        <dt>Attribute</dt>
+                        <dd id="attr"></dd>
+                        <dt>Note</dt>
+                        <dd id="note"></dd>
+                        <dt>Program</dt>
+                        <dd id="program"></dd>
+                        <dt>Location</dt>
+                        <dd id="unde"></dd>
+                        <dt>Creator</dt>
+                        <dd id="parent"></dd>
+                    </dl>
+                </div>
+                <input id="creator" type="radio" name="groupBy" value="creator" checked="checked">
+                <label for="creator">Group by Creator</label>
+                <br>
+                <input type="radio" id="location" name="groupBy" value="location" />
+                <label for="location">Group by Location</label>
+            </div>
+        </div>
 		<script type="module">
 			import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 
@@ -90,7 +54,17 @@
             // code[1] is the ID of the vessel this vessel is in
             // code[2] is the creator ID
             // code[3] is the timestamp it was created and/or updated
-            const links = data.map((d, i) => {
+            const linksByLocation = data.map((d, i) => {
+                const code = d.code.split('-');
+
+				// For now, point source to self
+                return {
+                    source: i,
+                    target: Number(code[1])
+                }
+            });
+
+            const linksByCreator = data.map((d, i) => {
                 const code = d.code.split('-');
 
 				// For now, point source to self
@@ -100,20 +74,22 @@
                 }
             });
 
+
             // Create a copy of data because this will get mutated
             const nodes = data.map(d => ({...d}));
+            const initialLinks = linksByCreator.map(d => ({...d}));
 
             // Create simulation
             const simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).distance(() => 15))
-                .force("charge", d3.forceManyBody())
+                .force("link", d3.forceLink(initialLinks).distance(() => 15))
+                .force("charge", d3.forceManyBody().strength(() => -15))
                 .force("x", d3.forceX())
                 .force("y", d3.forceY())
                 
 			// Declare the chart dimensions and margins.
-			const container = document.getElementById('graph');
-			const width = 1640;
-			const height = 800;
+			const container = document.getElementById('container');
+			const width = 850;
+			const height = 850;
 
             // Specify the color scale.
             const color = d3.scaleOrdinal(d3.schemeCategory10);
@@ -129,9 +105,11 @@
               .attr("stroke", "#999")
               .attr("stroke-opacity", 0.6)
               .selectAll("line")
-              .data(links)
+              .data(initialLinks)
               .join("line")
-              .attr("stroke-width", d => Math.sqrt(d.value));
+              .attr("stroke-width", d => {
+                return Math.sqrt(d.value)
+              });
 
             const node = svg.append("g")
                 .attr("stroke", "#fff")
@@ -139,7 +117,12 @@
                 .selectAll("circle")
                 .data(nodes)
                 .join("circle")
-                .attr("r", 3);
+                .attr("r", 4)
+                .attr("fill", (d) => {
+                    const code = d.code.split('-');
+                    return color(code[2]);
+                })
+                .on('mouseover', (e, d) => setDataInfo(d));
 
             node.append("title")
                 .text(d => `${d.attr} ${d.name}`);
@@ -157,9 +140,60 @@
 					.attr("cy", d => d.y);
 			  });
 
+            document.getElementById('creator').addEventListener('change', handleGroupByCreator);
+            function handleGroupByCreator() {
+                updateSimulation(data, linksByCreator, 2);
+            }
+
+            document.getElementById('location').addEventListener('change', handleGroupByLocation);
+            function handleGroupByLocation() {
+                updateSimulation(data, linksByLocation, 1);
+            }
+
+            function updateSimulation(nodes, links, groupTypeIndex) {
+                const newNodes = nodes.map(d => ({...d}));
+                const newLinks = links.map(d => ({...d}));
+
+                simulation.nodes(newNodes);
+                simulation.force("link", d3.forceLink(newLinks).distance(() => 15))
+                simulation.alpha(1).restart();
+
+                node.data(newNodes)
+                    .join("circle")
+                    .attr("fill", (d) => {
+                        const code = d.code.split('-');
+                        return color(code[groupTypeIndex]);
+                    });
+                link.data(newLinks);
+            }
+
+            function setDataInfo(d) {
+                const n = document.getElementById('name');
+                const a = document.getElementById('attr');
+                const l = document.getElementById('note');
+                const p = document.getElementById('program');
+                const u = document.getElementById('unde');
+                const c = document.getElementById('parent');
+
+                n.innerHTML = d.name;
+                a.innerHTML = d.attr;
+                l.innerHTML = d.note.join(' ');
+                p.innerHTML = d.program.join(' ');
+
+                const code = d.code.split('-');
+                u.innerHTML = code[1];
+                c.innerHTML = code[2];
+            }
+
+            // On click, only show the node, all the nodes descending from it, 
+            // it's siblings, as well as the parent it is located in. 
+            // On mouse release, go back to normal view.
+            // On shift+click, only show the node, all the nodes it has created,
+            // its parent, and all the node the parent has created.
+            // On mouse release, go back to normal view.
 
             // Append the SVG element.
-                document.body.append(svg.node());
+            container.append(svg.node());
         </script>
 	</body>
 </html>

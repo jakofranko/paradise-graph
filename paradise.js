@@ -1207,3 +1207,80 @@ const paradise = [
     "0000-00019-01198-20240522164313 note           private                                                                      Indecipherable scribblings, only a couple words can be discerned.. train station, locked, rating",
     "0000-01204-01198-20240529210639 note           scribbled                                                                    There are ((paradise cyan count)) cyan vessels and ((paradise red count)) red vessels.. The cyan vessels are ((paradise cyan list)).. The red vessels are ((paradise red list))",
 ];
+
+const data = paradise.map((row, index) => {
+    const splitRow = row.split(' ');
+
+    let code = splitRow[0]; 
+    let name = splitRow[1];
+    let attr = [], 
+        program = [], 
+        note = [];
+
+    // If more than one space is found in a row, it starts a new section
+    let sectionIndex = 0;
+    let lastWord = '';
+    for (let i = 2; i < splitRow.length; i++) {
+        const word = splitRow[i];
+
+        // We found a vessel with a name at the size limit.
+            // This word is the attr    
+        if (i == 2 && word != '') {
+            attr.push(word);
+            lastWord = word;
+            sectionIndex++;
+            console.log('Woah! Big name!', word, index); 
+            continue;
+        }
+
+        // We found an attr at the size limit
+        if (i == 3 && word != '') {
+            program.push(word);
+            lastWord = word;
+            sectionIndex++;
+            console.log('Woah! Big attr!', word, index); 
+            continue;
+        }
+
+        // Skip consecutive spaces
+        if (word == '' && lastWord == '') {
+            continue;
+        }
+
+        // Skip spaces and increment sectionIndex
+        if (word == '') {
+            sectionIndex++;
+            lastWord = word;
+            continue;
+        }
+
+        if (sectionIndex == 0) {
+            attr.push(word);
+        }
+
+        if (sectionIndex == 1) {
+            program.push(word);
+        }
+
+        if (sectionIndex == 2) {
+            note.push(word);
+        }
+
+        lastWord = word;
+    }
+
+    // TODO: handle programs at char limit
+    // TODO: handle vessels without attrs but that do have programs
+    if (attr.length > 1 && note.length == 0) {
+        note = [...attr];
+        attr = [];
+    }
+
+    // If a vessel has a note but no program, the note will have been
+    // put in the program space.
+        if (note.length  == 0 && program.length > 0) {
+            note = [...program];
+            program = [];
+        }
+    return { code, name, attr, program, note };
+});
