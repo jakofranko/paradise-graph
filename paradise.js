@@ -1282,5 +1282,5 @@ const data = paradise.map((row, index) => {
             note = [...program];
             program = [];
         }
-    return { code, name, attr, program, note };
+    return { id: index, code, name, attr, program, note };
 });

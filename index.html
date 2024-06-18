@@ -74,6 +74,49 @@
                 }
             });
 
+            const paradoxes = data.reduce((paradoxAccumulator, d, i) => {
+                const code = d.code.split('-');
+				const parent = Number(code[1]);
+
+				if (parent === i) {
+					const vessel = {...d};
+					paradoxAccumulator.push(vessel);
+				}
+
+				return paradoxAccumulator;
+            }, []);
+
+			const paradoxGroups = paradoxes.reduce((groupAccumulator, p, i) => {
+				const paradoxVessels = [];
+				const searchQueue = [p];
+				const searchedVessels = new Set();
+				while (searchQueue.length > 0) {
+					const currVessel = searchQueue.pop();
+
+					if (searchedVessels.has(currVessel.id)) continue;
+					
+					// Search data for all vessels that are located in this vessel
+					const childVessels = data.filter((d) => {
+						const code = d.code.split('-');
+						const parent = Number(code[1]);
+						
+						return parent === currVessel.id;
+					});
+
+					// Add these vessels to this paradox's vessels and the search queue
+					childVessels.forEach((v, i) => {
+						paradoxVessels.push(v);
+						searchQueue.push(v);
+					});
+
+					// Add this vessel to the list of searched vessels
+					searchedVessels.add(currVessel.id);
+				}
+
+				if (!groupAccumulator[p.id]) groupAccumulator[p.id] = [];
+				groupAccumulator[p.id] = groupAccumulator[p.id].concat(paradoxVessels);
+				return groupAccumulator;
+			}, {});
 
             // Create a copy of data because this will get mutated
             const nodes = data.map(d => ({...d}));
@@ -85,6 +128,7 @@
                 .force("charge", d3.forceManyBody().strength(() => -15))
                 .force("x", d3.forceX())
                 .force("y", d3.forceY())
+				.alphaDecay(0.001);
                 
 			// Declare the chart dimensions and margins.
 			const container = document.getElementById('container');
@@ -122,10 +166,18 @@
                     const code = d.code.split('-');
                     return color(code[2]);
                 })
-                .on('mouseover', (e, d) => setDataInfo(d));
+                .on('mouseover', (e, d) => setDataInfo(d))
+				.on('mouseout', (e, d) => setDataInfo(selectedNodeData, selectNode))
+				.on('click', function(e, d) { selectNode(d, this); }); 
 
             node.append("title")
                 .text(d => `${d.attr} ${d.name}`);
+
+			// Add a drag behavior.
+			node.call(d3.drag()
+				.on("start", dragstarted)
+				.on("drag", dragged)
+				.on("end", dragended));
 
 			// Begin simulation
 			simulation.on("tick", () => {
@@ -150,6 +202,7 @@
                 updateSimulation(data, linksByLocation, 1);
             }
 
+			// TODO: group paradoxes into a bubble when sorting by location	
             function updateSimulation(nodes, links, groupTypeIndex) {
                 const newNodes = nodes.map(d => ({...d}));
                 const newLinks = links.map(d => ({...d}));
@@ -168,6 +221,8 @@
             }
 
             function setDataInfo(d) {
+				if (!d) return;
+
                 const n = document.getElementById('name');
                 const a = document.getElementById('attr');
                 const l = document.getElementById('note');
@@ -184,6 +239,62 @@
                 u.innerHTML = code[1];
                 c.innerHTML = code[2];
             }
+
+			let selectedNode, selectedNodeData, prevStroke, prevFill, prevR;
+			function selectNode(d, n) {
+				if (selectedNode !== undefined) {
+					d3.select(selectedNode).transition()
+						.attr('stroke', prevStroke)
+						.attr('fill', prevFill)
+						.attr('r', prevR)
+						.attr('stroke-dasharray', undefined);
+				}
+
+				selectedNodeData = d;
+				selectedNode = n;
+				prevStroke = d3.select(n).attr('stroke');
+				prevFill = d3.select(n).attr('fill');
+				prevR = d3.select(n).attr('r');
+
+				d3.select(selectedNode)
+					.transition()
+					.ease(d3.easeCubicOut)
+					.attr("r", 6)
+					.attr("stroke", "#000")
+					.attr('stroke-dasharray', '2,2');
+			}
+			
+
+
+			//=====================
+			// Util funcs
+			//=====================
+
+			// Reheat the simulation when drag starts, and fix the subject position.
+			function dragstarted(event) {
+				if (!event.active) simulation.alphaTarget(0.3).restart();
+				event.subject.fx = event.subject.x;
+				event.subject.fy = event.subject.y;
+			}
+
+			  // Update the subject (dragged node) position during drag.
+			 function dragged(event) {
+				event.subject.fx = event.x;
+				event.subject.fy = event.y;
+			 }
+
+			  // Restore the target alpha so the simulation cools after dragging ends.
+			  // Unfix the subject position now that it’s no longer being dragged.
+			 function dragended(event) {
+				if (!event.active) simulation.alphaTarget(0);
+				event.subject.fx = null;
+				event.subject.fy = null;
+			 }
+
+			//=====================
+			// End Util funcs
+			//=====================
+
 
             // On click, only show the node, all the nodes descending from it, 
             // it's siblings, as well as the parent it is located in. 
