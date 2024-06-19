@@ -3,7 +3,17 @@
 	<head>
 		<meta charset="UTF-8">
 		<title>Paradise Visualizer</title>
+        <link rel="stylesheet" href="nprogress.css">
+		<script src="nprogress.js"></script>
+        <script>
+            function delay(func) {
+                setTimeout(func, 10);
+            }
+
+            delay(NProgress.start());
+        </script>
 		<script src="paradise.js"></script>
+        <script>delay(NProgress.inc();)</script>
         <style>
             #container {
                 display: flex;
@@ -64,6 +74,8 @@
                 }
             });
 
+            delay(NProgress.inc());
+
             const linksByCreator = data.map((d, i) => {
                 const code = d.code.split('-');
 
@@ -73,6 +85,8 @@
                     target: Number(code[2])
                 }
             });
+
+            delay(NProgress.inc());
 
             const paradoxes = data.reduce((paradoxAccumulator, d, i) => {
                 const code = d.code.split('-');
@@ -85,6 +99,8 @@
 
 				return paradoxAccumulator;
             }, []);
+
+            delay(NProgress.inc());
 
 			const paradoxGroups = paradoxes.reduce((groupAccumulator, p, i) => {
 				const paradoxVessels = [];
@@ -104,7 +120,7 @@
 					});
 
 					// Add these vessels to this paradox's vessels and the search queue
-					childVessels.forEach((v, i) => {
+					childVessels.forEach((v) => {
 						paradoxVessels.push(v);
 						searchQueue.push(v);
 					});
@@ -118,6 +134,8 @@
 				return groupAccumulator;
 			}, {});
 
+            delay(NProgress.inc());
+
             // Create a copy of data because this will get mutated
             const nodes = data.map(d => ({...d}));
             const initialLinks = linksByCreator.map(d => ({...d}));
@@ -128,12 +146,14 @@
                 .force("charge", d3.forceManyBody().strength(() => -15))
                 .force("x", d3.forceX())
                 .force("y", d3.forceY())
-				.alphaDecay(0.001);
+				.alphaDecay(0.002);
                 
 			// Declare the chart dimensions and margins.
 			const container = document.getElementById('container');
 			const width = 850;
 			const height = 850;
+
+            delay(NProgress.inc());
 
             // Specify the color scale.
             const color = d3.scaleOrdinal(d3.schemeCategory10);
@@ -155,6 +175,8 @@
                 return Math.sqrt(d.value)
               });
 
+            delay(NProgress.inc());
+
             const node = svg.append("g")
                 .attr("stroke", "#fff")
                 .attr("stroke-width", 1.5)
@@ -169,6 +191,8 @@
                 .on('mouseover', (e, d) => setDataInfo(d))
 				.on('mouseout', (e, d) => setDataInfo(selectedNodeData, selectNode))
 				.on('click', function(e, d) { selectNode(d, this); }); 
+
+            delay(NProgress.inc());
 
             node.append("title")
                 .text(d => `${d.attr} ${d.name}`);
@@ -264,8 +288,6 @@
 					.attr('stroke-dasharray', '2,2');
 			}
 			
-
-
 			//=====================
 			// Util funcs
 			//=====================
@@ -305,6 +327,7 @@
 
             // Append the SVG element.
             container.append(svg.node());
+            NProgress.done();
         </script>
 	</body>
 </html>
