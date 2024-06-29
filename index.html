@@ -10,13 +10,28 @@
                 setTimeout(func, 10);
             }
 
-            delay(NProgress.start());
+            delay(NProgress.start);
         </script>
 		<script src="paradise.js"></script>
-        <script>delay(NProgress.inc();)</script>
+        <script src="data-functions.js"></script>
+        <script>delay(NProgress.inc)</script>
         <style>
+            *, *::before, *::after {
+                  box-sizing: border-box;
+            }
+
+            html, body {
+                height: 100%;
+                margin: 0;
+            }
+
             #container {
+                background: #333;
+                color: #eee;
+                padding: 0 50px;
                 display: flex;
+                align-items: center;
+                height: 100%;
             }
 
             #data {
@@ -58,276 +73,216 @@
 		<script type="module">
 			import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 
-            // Take the data parsed in the head and process it
-            // The code is a string of numbers, split by the '-' char.
-            // code[0] is the vessel attribute numbers: locked, hidden, silent, tunnel (0 for no, 1 for yes)
-            // code[1] is the ID of the vessel this vessel is in
-            // code[2] is the creator ID
-            // code[3] is the timestamp it was created and/or updated
-            const linksByLocation = data.map((d, i) => {
-                const code = d.code.split('-');
+            const linksByLocationPromise = getLinksByLocation(data);
+            linksByLocationPromise.then(() => NProgress.inc());
 
-				// For now, point source to self
-                return {
-                    source: i,
-                    target: Number(code[1])
-                }
-            });
+            const linksByCreatorPromise = getLinksByCreator(data);
+            linksByCreatorPromise.then(() => NProgress.inc());
 
-            delay(NProgress.inc());
+            // TODO: do something with paradoxes
+            const paradoxesPromise = getParadoxes(data)
+                .then((paradoxes) => {
+                    return getParadoxGroups(paradoxes);
+                });
 
-            const linksByCreator = data.map((d, i) => {
-                const code = d.code.split('-');
+            Promise.all([
+                linksByLocationPromise, 
+                linksByCreatorPromise, 
+            ])
+                .then(async ([
+                    linksByLocation, 
+                    linksByCreator, 
+                    paradoxesPromise, 
+                ]) => {
+                    // Create a copy of data because this will get mutated
+                    const nodes = data.map(d => ({...d}));
+                    const initialLinks = linksByCreator.map(d => ({...d}));
 
-				// For now, point source to self
-                return {
-                    source: i,
-                    target: Number(code[2])
-                }
-            });
+                    // Create simulation
+                    const simulation = await createForceLinkSimulation(d3, nodes, initialLinks);
+                    NProgress.inc();
 
-            delay(NProgress.inc());
+                    // Declare the chart dimensions and margins.
+                    const container = document.getElementById('container');
+                    const width = 850;
+                    const height = 850;
 
-            const paradoxes = data.reduce((paradoxAccumulator, d, i) => {
-                const code = d.code.split('-');
-				const parent = Number(code[1]);
+                    // Specify the color scale.
+                    const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-				if (parent === i) {
-					const vessel = {...d};
-					paradoxAccumulator.push(vessel);
-				}
+                    // Create the SVG container.
+                    const svg = d3.create("svg")
+                        .attr("width", width)
+                        .attr("height", height)
+                        .attr("viewBox", [-width / 2, -height / 2, width, height])
+                        .attr("style", "max-width: 100%; height: auto;");
 
-				return paradoxAccumulator;
-            }, []);
+                    const link = svg.append("g")
+                      .attr("stroke", "#999")
+                      .attr("stroke-opacity", 0.6)
+                      .selectAll("line")
+                      .data(initialLinks)
+                      .join("line")
+                      .attr("stroke-width", d => {
+                        return Math.sqrt(d.value)
+                      });
 
-            delay(NProgress.inc());
+                    NProgress.inc();
 
-			const paradoxGroups = paradoxes.reduce((groupAccumulator, p, i) => {
-				const paradoxVessels = [];
-				const searchQueue = [p];
-				const searchedVessels = new Set();
-				while (searchQueue.length > 0) {
-					const currVessel = searchQueue.pop();
+                    const node = svg.append("g")
+                        .attr("stroke", "#fff")
+                        .attr("stroke-width", 1.5)
+                        .selectAll("circle")
+                        .data(nodes)
+                        .join("circle")
+                        .attr("r", 4)
+                        .attr("fill", (d) => {
+                            const code = d.code.split('-');
+                            return color(code[2]);
+                        })
+                        .on('mouseover', (e, d) => setDataInfo(d))
+                        .on('mouseout', (e, d) => setDataInfo(selectedNodeData, selectNode))
+                        .on('click', function(e, d) { selectNode(d, this); }); 
 
-					if (searchedVessels.has(currVessel.id)) continue;
-					
-					// Search data for all vessels that are located in this vessel
-					const childVessels = data.filter((d) => {
-						const code = d.code.split('-');
-						const parent = Number(code[1]);
-						
-						return parent === currVessel.id;
-					});
+                    NProgress.inc();
 
-					// Add these vessels to this paradox's vessels and the search queue
-					childVessels.forEach((v) => {
-						paradoxVessels.push(v);
-						searchQueue.push(v);
-					});
+                    node.append("title")
+                        .text(d => `${d.attr} ${d.name}`);
 
-					// Add this vessel to the list of searched vessels
-					searchedVessels.add(currVessel.id);
-				}
+                    // Add a drag behavior.
+                    node.call(d3.drag()
+                        .on("start", dragstarted)
+                        .on("drag", dragged)
+                        .on("end", dragended));
 
-				if (!groupAccumulator[p.id]) groupAccumulator[p.id] = [];
-				groupAccumulator[p.id] = groupAccumulator[p.id].concat(paradoxVessels);
-				return groupAccumulator;
-			}, {});
+                    // Begin simulation
+                    simulation.on("tick", () => {
+                        link
+                            .attr("x1", d => d.source.x)
+                            .attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x)
+                            .attr("y2", d => d.target.y);
 
-            delay(NProgress.inc());
+                        node
+                            .attr("cx", d => d.x)
+                            .attr("cy", d => d.y);
+                      });
 
-            // Create a copy of data because this will get mutated
-            const nodes = data.map(d => ({...d}));
-            const initialLinks = linksByCreator.map(d => ({...d}));
+                    document.getElementById('creator').addEventListener('change', handleGroupByCreator);
+                    function handleGroupByCreator() {
+                        updateSimulation(data, linksByCreator, 2);
+                    }
 
-            // Create simulation
-            const simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(initialLinks).distance(() => 15))
-                .force("charge", d3.forceManyBody().strength(() => -15))
-                .force("x", d3.forceX())
-                .force("y", d3.forceY())
-				.alphaDecay(0.002);
-                
-			// Declare the chart dimensions and margins.
-			const container = document.getElementById('container');
-			const width = 850;
-			const height = 850;
+                    document.getElementById('location').addEventListener('change', handleGroupByLocation);
+                    function handleGroupByLocation() {
+                        updateSimulation(data, linksByLocation, 1);
+                    }
 
-            delay(NProgress.inc());
+                    // TODO: group paradoxes into a bubble when sorting by location	
+                    function updateSimulation(nodes, links, groupTypeIndex) {
+                        const newNodes = nodes.map(d => ({...d}));
+                        const newLinks = links.map(d => ({...d}));
 
-            // Specify the color scale.
-            const color = d3.scaleOrdinal(d3.schemeCategory10);
+                        simulation.nodes(newNodes);
+                        simulation.force("link", d3.forceLink(newLinks).distance(() => 15))
+                        simulation.alpha(1).restart();
 
-            // Create the SVG container.
-            const svg = d3.create("svg")
-                .attr("width", width)
-                .attr("height", height)
-				.attr("viewBox", [-width / 2, -height / 2, width, height])
-				.attr("style", "max-width: 100%; height: auto;");
+                        node.data(newNodes)
+                            .join("circle")
+                            .attr("fill", (d) => {
+                                const code = d.code.split('-');
+                                return color(code[groupTypeIndex]);
+                            });
+                        link.data(newLinks);
+                    }
 
-            const link = svg.append("g")
-              .attr("stroke", "#999")
-              .attr("stroke-opacity", 0.6)
-              .selectAll("line")
-              .data(initialLinks)
-              .join("line")
-              .attr("stroke-width", d => {
-                return Math.sqrt(d.value)
-              });
+                    function setDataInfo(d) {
+                        if (!d) return;
 
-            delay(NProgress.inc());
+                        const n = document.getElementById('name');
+                        const a = document.getElementById('attr');
+                        const l = document.getElementById('note');
+                        const p = document.getElementById('program');
+                        const u = document.getElementById('unde');
+                        const c = document.getElementById('parent');
 
-            const node = svg.append("g")
-                .attr("stroke", "#fff")
-                .attr("stroke-width", 1.5)
-                .selectAll("circle")
-                .data(nodes)
-                .join("circle")
-                .attr("r", 4)
-                .attr("fill", (d) => {
-                    const code = d.code.split('-');
-                    return color(code[2]);
-                })
-                .on('mouseover', (e, d) => setDataInfo(d))
-				.on('mouseout', (e, d) => setDataInfo(selectedNodeData, selectNode))
-				.on('click', function(e, d) { selectNode(d, this); }); 
+                        n.innerHTML = d.name;
+                        a.innerHTML = d.attr;
+                        l.innerHTML = d.note.join(' ');
+                        p.innerHTML = d.program.join(' ');
 
-            delay(NProgress.inc());
-
-            node.append("title")
-                .text(d => `${d.attr} ${d.name}`);
-
-			// Add a drag behavior.
-			node.call(d3.drag()
-				.on("start", dragstarted)
-				.on("drag", dragged)
-				.on("end", dragended));
-
-			// Begin simulation
-			simulation.on("tick", () => {
-				link
-					.attr("x1", d => d.source.x)
-					.attr("y1", d => d.source.y)
-					.attr("x2", d => d.target.x)
-					.attr("y2", d => d.target.y);
-
-				node
-					.attr("cx", d => d.x)
-					.attr("cy", d => d.y);
-			  });
-
-            document.getElementById('creator').addEventListener('change', handleGroupByCreator);
-            function handleGroupByCreator() {
-                updateSimulation(data, linksByCreator, 2);
-            }
-
-            document.getElementById('location').addEventListener('change', handleGroupByLocation);
-            function handleGroupByLocation() {
-                updateSimulation(data, linksByLocation, 1);
-            }
-
-			// TODO: group paradoxes into a bubble when sorting by location	
-            function updateSimulation(nodes, links, groupTypeIndex) {
-                const newNodes = nodes.map(d => ({...d}));
-                const newLinks = links.map(d => ({...d}));
-
-                simulation.nodes(newNodes);
-                simulation.force("link", d3.forceLink(newLinks).distance(() => 15))
-                simulation.alpha(1).restart();
-
-                node.data(newNodes)
-                    .join("circle")
-                    .attr("fill", (d) => {
                         const code = d.code.split('-');
-                        return color(code[groupTypeIndex]);
-                    });
-                link.data(newLinks);
-            }
+                        u.innerHTML = code[1];
+                        c.innerHTML = code[2];
+                    }
 
-            function setDataInfo(d) {
-				if (!d) return;
+                    let selectedNode, selectedNodeData, prevStroke, prevFill, prevR;
+                    function selectNode(d, n) {
+                        if (selectedNode !== undefined) {
+                            d3.select(selectedNode).transition()
+                                .attr('stroke', prevStroke)
+                                .attr('fill', prevFill)
+                                .attr('r', prevR)
+                                .attr('stroke-dasharray', undefined);
+                        }
 
-                const n = document.getElementById('name');
-                const a = document.getElementById('attr');
-                const l = document.getElementById('note');
-                const p = document.getElementById('program');
-                const u = document.getElementById('unde');
-                const c = document.getElementById('parent');
+                        selectedNodeData = d;
+                        selectedNode = n;
+                        prevStroke = d3.select(n).attr('stroke');
+                        prevFill = d3.select(n).attr('fill');
+                        prevR = d3.select(n).attr('r');
 
-                n.innerHTML = d.name;
-                a.innerHTML = d.attr;
-                l.innerHTML = d.note.join(' ');
-                p.innerHTML = d.program.join(' ');
+                        d3.select(selectedNode)
+                            .transition()
+                            .ease(d3.easeCubicOut)
+                            .attr("r", 6)
+                            .attr("stroke", "#000")
+                            .attr('stroke-dasharray', '2,2');
+                    }
+                    
+                    //=====================
+                    // Util funcs
+                    //=====================
 
-                const code = d.code.split('-');
-                u.innerHTML = code[1];
-                c.innerHTML = code[2];
-            }
+                    // Reheat the simulation when drag starts, and fix the subject position.
+                    function dragstarted(event) {
+                        if (!event.active) simulation.alphaTarget(0.3).restart();
+                        event.subject.fx = event.subject.x;
+                        event.subject.fy = event.subject.y;
+                    }
 
-			let selectedNode, selectedNodeData, prevStroke, prevFill, prevR;
-			function selectNode(d, n) {
-				if (selectedNode !== undefined) {
-					d3.select(selectedNode).transition()
-						.attr('stroke', prevStroke)
-						.attr('fill', prevFill)
-						.attr('r', prevR)
-						.attr('stroke-dasharray', undefined);
-				}
+                      // Update the subject (dragged node) position during drag.
+                     function dragged(event) {
+                        event.subject.fx = event.x;
+                        event.subject.fy = event.y;
+                     }
 
-				selectedNodeData = d;
-				selectedNode = n;
-				prevStroke = d3.select(n).attr('stroke');
-				prevFill = d3.select(n).attr('fill');
-				prevR = d3.select(n).attr('r');
+                      // Restore the target alpha so the simulation cools after dragging ends.
+                      // Unfix the subject position now that it’s no longer being dragged.
+                     function dragended(event) {
+                        if (!event.active) simulation.alphaTarget(0);
+                        event.subject.fx = null;
+                        event.subject.fy = null;
+                     }
 
-				d3.select(selectedNode)
-					.transition()
-					.ease(d3.easeCubicOut)
-					.attr("r", 6)
-					.attr("stroke", "#000")
-					.attr('stroke-dasharray', '2,2');
-			}
-			
-			//=====================
-			// Util funcs
-			//=====================
-
-			// Reheat the simulation when drag starts, and fix the subject position.
-			function dragstarted(event) {
-				if (!event.active) simulation.alphaTarget(0.3).restart();
-				event.subject.fx = event.subject.x;
-				event.subject.fy = event.subject.y;
-			}
-
-			  // Update the subject (dragged node) position during drag.
-			 function dragged(event) {
-				event.subject.fx = event.x;
-				event.subject.fy = event.y;
-			 }
-
-			  // Restore the target alpha so the simulation cools after dragging ends.
-			  // Unfix the subject position now that it’s no longer being dragged.
-			 function dragended(event) {
-				if (!event.active) simulation.alphaTarget(0);
-				event.subject.fx = null;
-				event.subject.fy = null;
-			 }
-
-			//=====================
-			// End Util funcs
-			//=====================
+                    //=====================
+                    // End Util funcs
+                    //=====================
 
 
-            // On click, only show the node, all the nodes descending from it, 
-            // it's siblings, as well as the parent it is located in. 
-            // On mouse release, go back to normal view.
-            // On shift+click, only show the node, all the nodes it has created,
-            // its parent, and all the node the parent has created.
-            // On mouse release, go back to normal view.
+                    // On click, only show the node, all the nodes descending from it, 
+                    // it's siblings, as well as the parent it is located in. 
+                    // On mouse release, go back to normal view.
+                    // On shift+click, only show the node, all the nodes it has created,
+                    // its parent, and all the node the parent has created.
+                    // On mouse release, go back to normal view.
 
-            // Append the SVG element.
-            container.append(svg.node());
-            NProgress.done();
+                    // Append the SVG element.
+                    container.append(svg.node());
+                })
+                .finally(() => {
+                    NProgress.done();
+                });
         </script>
 	</body>
 </html>
